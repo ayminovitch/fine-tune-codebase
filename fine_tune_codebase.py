@@ -106,6 +106,14 @@ def load_and_tokenize_dataset(output_file, model_name):
         dataset = dataset["train"].train_test_split(test_size=0.1)  # 90% train, 10% validation
 
         tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+        if tokenizer.pad_token is None:
+            logger.warning(
+                f"Tokenizer for '{model_name}' does not have a pad_token. "
+                f"Setting pad_token to eos_token ('{tokenizer.eos_token}') for padding."
+            )
+            tokenizer.pad_token = tokenizer.eos_token
+
         def tokenize_function(examples):
             return tokenizer(examples["text"], truncation=True, padding="max_length", max_length=512)
 
@@ -128,6 +136,20 @@ def fine_tune_model(tokenized_dataset, tokenizer, model_name, output_dir, learni
         )
 
     model = AutoModelForCausalLM.from_pretrained(model_name, quantization_config=quantization_config)
+
+    if tokenizer.pad_token is None:
+        if tokenizer.eos_token:
+            logger.warning("Tokenizer passed to fine_tune_model has no pad_token. Setting to eos_token.")
+            tokenizer.pad_token = tokenizer.eos_token
+        else:
+            raise ValueError("Tokenizer has no pad_token and no eos_token to use as a fallback.")
+
+    if model.config.pad_token_id is None or model.config.pad_token_id != tokenizer.pad_token_id:
+        logger.info(
+            f"Aligning model's pad_token_id ({model.config.pad_token_id}) "
+            f"with tokenizer's pad_token_id ({tokenizer.pad_token_id})."
+        )
+        model.config.pad_token_id = tokenizer.pad_token_id
 
     # Apply LoRA
     lora_config = LoraConfig(
